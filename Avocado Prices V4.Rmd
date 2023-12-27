@@ -1,0 +1,582 @@
+---
+title: "Avocado Prices"
+author: "Barbara Schmitz & Tiffany Geistkemper"
+date: "`r Sys.Date()`"
+output: word_document
+---
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+##Loading Libraries
+```{r}
+library(tidyverse)
+library(scales)
+library(lubridate)
+library(TSA)
+library(tseries)
+library(RColorBrewer)
+library(gridExtra)
+library(stats)
+```
+
+##Settings
+```{r}
+#options(scipen = 999)
+```
+
+##Loading Dataset 
+
+```{r}
+df <- read.csv("avocado.csv")
+```
+
+```{r}
+head(df)
+```
+#Cleaning Data
+```{r}
+df <- df %>%
+  select(Date, AveragePrice, type) %>%
+  mutate(Date = ymd(Date),
+         type = factor(type),
+         month = month(Date),
+         year = year(Date)) %>%
+  arrange(Date)
+
+head(df)
+```
+##Checking for Normality 
+
+Both organic and conventional types are normally distributed, slightly more positive/right skew for the conventional avocado type. 
+```{r}
+densityplot <- df%>%
+  ggplot(aes(x=AveragePrice, fill = type))+
+  geom_density()+
+  facet_wrap(~type)+
+  labs(x = "Average Price",
+       y="density",
+       title = "Average Avocado Price by Type")+
+   scale_fill_manual(values = c("organic" = "#5ab4ac", "conventional" = "#d8b365"))+
+  theme_minimal()
+
+print(densityplot)
+```
+We can inspect with qqplots to confirm. They look mostly normal except at the tail ends.
+```{r}
+organic_df <- df%>%
+  filter(type=="organic")
+conventional_df <-df%>%
+  filter(type=="conventional")
+```
+
+
+```{r}
+par(mfrow = c(1, 2))
+qqnorm(organic_df$AveragePrice, main = "Q-Q Plot - Organic", col = "#5ab4ac", pch = 20)
+qqline(organic_df$AveragePrice, col = "red")
+
+
+qqnorm(conventional_df$AveragePrice, main = "Q-Q Plot - Conventional", col = "#d8b365", pch = 20)
+qqline(conventional_df$AveragePrice, col = "red")
+```
+
+#Creating sample dfs for shapiro wilks function
+```{r}
+sampled_organic <- organic_df %>% #sampling to 5000 because apparently shapiro.wilks won't work for greater than 5000. 
+  sample_n(5000, replace = FALSE)
+
+sampled_conventional <- conventional_df %>% #sampling to 5000 because apparently shapiro.wilks won't work for greater than 5000. 
+  sample_n(5000, replace = FALSE)
+```
+
+Quantitatively, we can check using a Shapiro-Wilks test.  We reject the null hypothesis of normality. 
+```{r}
+shapiro_organic <- shapiro.test(sampled_organic$AveragePrice)
+shapiro_conventional <- shapiro.test(sampled_conventional$AveragePrice)
+
+print(paste("Sampled Organic W =", shapiro_organic$statistic))
+print(paste("Sampled Organic p-value =", shapiro_organic$p.value))
+
+print(paste("Sampled Conventional W =", shapiro_conventional$statistic))
+print(paste("Sampled Conventional p-value =", shapiro_conventional$p.value))
+```
+##Independence 
+
+
+```{r}
+
+```
+
+
+##Time Series
+
+Over time the organic type avocados are more expensive than conventional avocados.  
+```{r}
+conventional_ts_data <- ts(conventional_df$AveragePrice, frequency = 52, start=c(2015,1), end = c(2018, 12)) #looking at the data it seems to be weekly so the frequency is 52
+plot(conventional_ts_data, ylim = c(0.5, 2.5), ylab = 'Average Price', main = 'Average Avocado Price by Week', xaxp = c(2015, 2018, 3), col = "#d8b365")
+organic_ts_data <- ts(organic_df$AveragePrice, frequency = 52, start=c(2015,1), end = c(2018, 12)) #looking at the data it seems to be weekly so the frequency is 52
+lines(organic_ts_data, col = "#5ab4ac")
+legend("topright", legend=c("Conventional", "Organic"),  
+       fill = c("#d8b365","#5ab4ac"), cex = 0.6) 
+```
+
+Separating the two series, it is more obvious they seem stationary around the mean value per avocado type. 
+```{r}
+conventional_ts_data <- ts(conventional_df$AveragePrice, frequency = 52, start=c(2015,1), end = c(2018, 12)) #looking at the data it seems to be weekly so the frequency is 52
+plot(conventional_ts_data, ylab = 'Average Price', main = 'Average Conventional Avocado Price', xaxp = c(2015, 2018, 3), col = "#d8b365")
+abline(h = mean(conventional_df$AveragePrice))
+
+organic_ts_data <- ts(organic_df$AveragePrice, frequency = 52, start=c(2015,1), end = c(2018, 12)) #looking at the data it seems to be weekly so the frequency is 52
+plot(organic_ts_data, ylab = 'Average Price', main = 'Average Organic Avocado Price', xaxp = c(2015, 2018, 3), col = "#5ab4ac")
+abline(h = mean(organic_df$AveragePrice))
+```
+
+We can further examine these yearly. 
+At the yearly level, neither types follow the same pattern. Not conclusive enough to identify as cyclical.
+
+```{r}
+# Calculate the average of average prices per year per type
+avg_yearly_prices <- df %>%
+  group_by(year = year(Date), type) %>%
+  summarize(avg_price = mean(AveragePrice))
+
+yearly_plot <- avg_yearly_prices %>%
+  ggplot(aes(x = factor(year), y = avg_price, fill = type)) +
+  geom_bar(stat = "identity", position = "dodge", color = "black") +
+  labs(x = "Year", y = "Average Price", title = "Average Avocado Prices by Type per Year") +
+  scale_fill_manual(values = c("organic" = "#5ab4ac", "conventional" = "#d8b365")) +
+  theme_minimal()
+
+line_plot <- avg_yearly_prices %>%
+  ggplot(aes(x = factor(year), y = avg_price, group = type, color = type)) +
+  geom_line() +
+  geom_point(shape = 'o') +
+  labs(x = "Year", y = "Average Price", title = "Yearly Average Avocado Prices by Type") +
+  scale_color_manual(values = c("organic" = "#5ab4ac", "conventional" = "#d8b365")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+```{r}
+print(yearly_plot)
+```
+
+```{r}
+print(line_plot)
+```
+
+```{r}
+print(avg_yearly_prices)
+```
+
+
+Examining through a monthly lens, there is a pattern. There appears to be seasonality particularly in months September to November. I suspect this is because avocados are in season during spring and summer. 
+```{r}
+df <- df %>%
+  mutate(month = month(Date), year = year(Date))
+
+# Calculate the average of average prices per month per year and per type
+avg_prices_monthly <- df %>%
+  group_by(month, type) %>%
+  summarize(avg_price = mean(AveragePrice))
+
+monthly_plot <- ggplot(data = avg_prices_monthly, aes(x = factor(month), y = avg_price, fill = type)) +
+  geom_bar(stat = "identity", position = "dodge", color = "black") +
+  labs(x = "Month", y = "Average Price", title = "Average Avocado Prices by Type per Month") +
+  scale_fill_manual(values = c("organic" = "#5ab4ac", "conventional" = "#d8b365")) +
+  theme_minimal()
+
+line_plot_monthly <- df %>%
+  group_by(year, month, type) %>%
+  summarize(avg_price = mean(AveragePrice)) %>%
+  ggplot(aes(x = interaction(year, month), y = avg_price, group = type, color = type)) +
+  geom_line() +
+  geom_point(shape = 'o') +
+  labs(x = "Year-Month", y = "Average Price", title = "Average Avocado Prices Over Time by Type") +
+  scale_x_discrete(labels = function(x) gsub("(\\d+)-(\\d+)", "\\2-\\1", x)) +
+  theme_minimal() +
+  scale_color_manual(values = c("organic" = "#5ab4ac", "conventional" = "#d8b365")) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+
+```{r}
+print(monthly_plot)
+```
+```{r}
+print(line_plot_monthly)
+```
+
+```{r}
+print(avg_prices_monthly)
+```
+```{r}
+# Create week and year variables
+df <- df %>%
+  mutate(week = week(Date), year = year(Date))
+
+# Calculate the average of average prices per week per year and per type
+avg_prices_weekly <- df %>%
+  group_by(week, year, type) %>%
+  summarize(avg_price = mean(AveragePrice))
+
+# Weekly bar plot
+weekly_bar_plot <- ggplot(data = avg_prices_weekly, aes(x = factor(week), y = avg_price, fill = type)) +
+  geom_bar(stat = "identity", position = "dodge", color = "black") +
+  labs(x = "Week", y = "Average Price", title = "Average Avocado Prices by Type per Week") +
+  scale_fill_manual(values = c("organic" = "#5ab4ac", "conventional" = "#d8b365")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 5))
+
+# Weekly line plot over time
+line_plot_weekly <- df %>%
+  group_by(year, week, type) %>%
+  summarize(avg_price = mean(AveragePrice)) %>%
+  ggplot(aes(x = interaction(year, week), y = avg_price, group = type, color = type)) +
+  geom_line() +
+  geom_point(shape = 'o') +
+  labs(x = "Year-Week", y = "Average Price", title = "Average Avocado Prices Over Time by Type") +
+  scale_x_discrete(labels = function(x) gsub("(\\d+)-(\\d+)", "\\2-\\1", x)) +
+  theme_minimal() +
+  scale_color_manual(values = c("organic" = "#5ab4ac", "conventional" = "#d8b365")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Print the plots
+print(weekly_bar_plot)
+print(line_plot_weekly)
+```
+
+```{r}
+print(avg_prices_weekly)
+```
+
+##Augmented Dickey Fuller Tests
+
+We compute the augmented Dickey-Fuller (ADF) test statistic for the each of the averaged, conventional, and organic avocado datasets and come to the same conclusions for each: We can reject the null hypothesis because the p-value is smaller than 0.05, which indicates that the time series is stationary. However, the order selected is 20 for the time series, which indicates this test statistic isn't very meaningful and shouldn't be taken into consideration as much as other test statistics. In addition, according to the previous function (ar(diff(df))), the order selected could have been around double, making this test statistic even less meaningful. 
+```{r}
+#Averaged (We can reject the null hypothesis because the p-value is smaller than 0.05, 
+#which indicates the time series is stationary. But the order selected is ridiculous (20), 
+#so this doesn't really even matter. And it could have been double this according to the previous function.)
+ar(diff(df$AveragePrice))
+adf.test(df$AveragePrice)
+#Conventional (We can reject the null hypothesis because the p-value is smaller than 0.05)
+#which indicates the time series is stationary. But the order selected is ridiculous (20), 
+#so this doesn't really even matter). And it could have been double this according to the previous function.)
+ar(diff(conventional_df$AveragePrice))
+adf.test(conventional_df$AveragePrice)
+#Organic (We can reject the null hypothesis because the p-value is smaller than 0.05)
+#which indicates the time series is stationary. But the order selected is ridiculous (20), 
+#so this doesn't really even matter). And it could have been double this according to the previous function.)
+ar(diff(organic_df$AveragePrice))
+adf.test(organic_df$AveragePrice)
+```
+
+##Autocorrelation and Partial Autocorrelation Analysis
+Looking holistically for both conventional and organic avocados, the ACF and PACF plots below. 
+```{r}
+ts_data <- ts(df$AveragePrice, frequency = 52, start=c(2015,1), end = c(2018, 12)) #looking at the data it seems to be weekly so the frequency is 52, start is the first week in 2015, end is the 12th week in 2018
+
+# ACF Analysis
+#acf_result <- acf(df$AveragePrice, main = "Autocorrelation Function (ACF) Plot")
+#acf_result <- acf(diff(df$AveragePrice), ci.type = 'ma', main = "Differenced Autocorrelation Function (ACF)  Plot") #Note this includes with adjusted ma bounds
+```
+
+```{r}
+# PACF Analysis
+#pacf_result <- pacf(df$AveragePrice, main = "Partial Autocorrelation Function (PACF) Plot")
+#pacf(diff(df$AveragePrice), main = "Differenced Partial Autocorrelation Function (PACF) Plot")
+```
+
+```{r}
+conventional_ts_data <- ts(conventional_df$AveragePrice, frequency = 52, start=c(2015,1), end = c(2018, 12)) #looking at the data it seems to be weekly so the frequency is 52, start is the first week in 2015, end is the 12th week in 2018
+organic_ts_data <- ts(organic_df$AveragePrice, frequency = 52, start=c(2015,1), end = c(2018, 12)) #looking at the data it seems to be weekly so the frequency is 52, start is the first week in 2015, end is the 12th week in 2018
+
+
+# Plot ACF for Conventional Type
+acf(conventional_df$AveragePrice, main = "Conventional Type (ACF) Plot")
+acf(diff(conventional_df$AveragePrice), ci.type = 'ma', main = "Differenced Conventional Type (ACF) Plot") #Note this includes with adjusted ma bounds
+```
+```{r}
+# Plot PACF for Conventional Type
+pacf(conventional_df$AveragePrice, main = "Conventional Type (PACF) Plot")
+pacf(diff(conventional_df$AveragePrice), main = "Differenced Conventional Type (PACF) Plot")
+
+```
+```{r}
+# Plot ACF for Organic Type
+acf(organic_df$AveragePrice, main = "Organic Type (ACF) Plot")
+acf(diff(organic_df$AveragePrice), ci.type='ma', main = "Differenced Organic Type (ACF) Plot") #Note this includes with adjusted ma bounds
+
+```
+```{r}
+# Plot PACF for Organic Type
+pacf(organic_df$AveragePrice, main = "Organic Type (PACF) Plot")
+pacf(diff(organic_df$AveragePrice), main = "Differenced Organic Type (PACF) Plot")
+```
+
+```{r}
+# Plot EACF
+#eacf(df$AveragePrice)
+```
+EACF Differenced
+```{r}
+#eacf(diff(df$AveragePrice))
+```
+
+
+```{r}
+# Plot EACF For Conventional Type
+eacf(conventional_df$AveragePrice)
+```
+EACF Differenced
+```{r}
+eacf(diff(conventional_df$AveragePrice))
+```
+```{r}
+# Plot EACF For Organic Type
+eacf(organic_df$AveragePrice)
+```
+EACF Differenced
+```{r}
+eacf(diff(organic_df$AveragePrice))
+```
+
+##Model Fitting
+
+##Cosine Trends Model
+```{r}
+#Combined
+har_df1=harmonic(ts_data, m = 1)
+model_df1=lm(ts_data~har_df1)
+summary(model_df1)
+ts_model_df1 <- ts(fitted(model_df1),freq=52, start=c(2015,1), end = c(2018, 12))
+
+har_df2=harmonic(ts_data, m = 2)
+model_df2=lm(ts_data~har_df2)
+summary(model_df2)
+ts_model_df2 <- ts(fitted(model_df2),freq=52, start=c(2015,1), end = c(2018, 12))
+
+har_df3=harmonic(ts_data, m = 3)
+model_df3=lm(ts_data~har_df3)
+summary(model_df3)
+ts_model_df3 <- ts(fitted(model_df3),freq=52, start=c(2015,1), end = c(2018, 12))
+
+plot(ts_model_df1,ylab='Price',type='l',
+     ylim=range(c(ts_model_df1,ts_data)), col = 'green', main = 'Cosine Trends Model') # the ylim option ensures that the 
+# y axis has a range that fits the raw data and the fitted values
+lines(ts_model_df2, col = 'red')
+lines(ts_model_df3, col = 'blue')
+points(ts_data)
+lines(ts_data, col = 'black')
+legend("topright", legend=c("Original Time Series", "m = 1", "m = 2", "m = 3"),  
+       fill = c("black", "green", "red", "blue"), cex = 0.6) 
+```
+
+```{r}
+#conventional
+har_df1=harmonic(conventional_ts_data, m = 1)
+model_df1=lm(conventional_ts_data~har_df1)
+summary(model_df1)
+ts_model_df1 <- ts(fitted(model_df1),freq=52, start=c(2015,1), end = c(2018, 12))
+
+har_df2=harmonic(conventional_ts_data, m = 2)
+model_df2=lm(conventional_ts_data~har_df2)
+summary(model_df2)
+ts_model_df2 <- ts(fitted(model_df2),freq=52, start=c(2015,1), end = c(2018, 12))
+
+har_df3=harmonic(conventional_ts_data, m = 3)
+model_df3=lm(conventional_ts_data~har_df3)
+summary(model_df3)
+ts_model_df3 <- ts(fitted(model_df3),freq=52, start=c(2015,1), end = c(2018, 12))
+
+plot(ts_model_df1,ylab='Price',type='l',
+     ylim=range(c(ts_model_df1,conventional_ts_data)), col = 'green', main = 'Cosine Trends Model: Conventional') # the ylim option ensures that the 
+# y axis has a range that fits the raw data and the fitted values
+lines(ts_model_df2, col = 'red')
+lines(ts_model_df3, col = 'blue')
+points(conventional_ts_data)
+lines(conventional_ts_data, col = "#d8b365")
+legend("topright", legend=c("Conventional Time Series", "m = 1", "m = 2", "m = 3"),  
+       fill = c("#d8b365", "green", "red", "blue"), cex = 0.6) 
+```
+
+```{r}
+#Organic
+har_df1=harmonic(organic_ts_data, m = 1)
+model_df1=lm(organic_ts_data~har_df1)
+summary(model_df1)
+ts_model_df1 <- ts(fitted(model_df1),freq=52, start=c(2015,1), end = c(2018, 12))
+
+har_df2=harmonic(organic_ts_data, m = 2)
+model_df2=lm(organic_ts_data~har_df2)
+summary(model_df2)
+ts_model_df2 <- ts(fitted(model_df2),freq=52, start=c(2015,1), end = c(2018, 12))
+
+har_df3=harmonic(organic_ts_data, m = 3)
+model_df3=lm(organic_ts_data~har_df3)
+summary(model_df3)
+ts_model_df3 <- ts(fitted(model_df3),freq=52, start=c(2015,1), end = c(2018, 12))
+
+plot(ts_model_df1,ylab='Price',type='l',
+     ylim=range(c(ts_model_df1,organic_ts_data)), col = 'green', main = 'Cosine Trends Model: Organic') # the ylim option ensures that the 
+# y axis has a range that fits the raw data and the fitted values
+lines(ts_model_df2, col = 'red')
+lines(ts_model_df3, col = 'blue')
+points(organic_ts_data)
+lines(organic_ts_data, col = "#5ab4ac")
+legend("topright", legend=c("Organic Time Series", "m = 1", "m = 2", "m = 3"),  
+       fill = c("#5ab4ac", "green", "red", "blue"), cex = 0.6) 
+```
+
+##Model Fitting
+
+```{r}
+arima(conventional_df$AveragePrice, order = c(1,0,2), method = 'ML') #ARMA(1,2), this one is better via AIC
+```
+
+```{r}
+arima(diff(conventional_df$AveragePrice), order = c(0,1,2), method = 'ML') #IMA(2,1)
+```
+
+```{r}
+arima(organic_df$AveragePrice, order = c(1,0,2), method = 'ML') #ARMA(1,2) this one is better via AIC
+```
+```{r}
+arima(diff(organic_df$AveragePrice), order = c(0,1,2), method = 'ML') #IMA(1,2)
+```
+
+##Residual Analysis
+
+We can reject the null hypothesis of independence for the ARMA(1,2) Conventional, IMA(1,2) Conventional and IMA(1,2) Organic. We fail to reject the null hypothesis of independence for ARMA(1,2) Organic. 
+```{r}
+arma_conv <-arima(conventional_df$AveragePrice, order = c(1,0,2), method = 'ML')
+arma_org <-arima(organic_df$AveragePrice, order = c(1,0,2), method = 'ML')
+
+ima_conv <-arima(diff(conventional_df$AveragePrice), order = c(0,1,2), method = 'ML')
+ima_org <-arima(diff(organic_df$AveragePrice), order = c(0,1,2), method = 'ML')
+```
+
+```{r}
+# Extract residuals
+residuals_arma_conv <- resid(arma_conv)
+residuals_arma_org <- resid(arma_org)
+residuals_ima_conv <- resid(ima_conv)
+residuals_ima_org <- resid(ima_org)
+```
+
+```{r}
+# Convert residuals to factors because otherwise it breaks
+factor_residuals_arma_conv <- as.factor(sign(residuals_arma_conv))
+factor_residuals_arma_org <- as.factor(sign(residuals_arma_org))
+factor_residuals_ima_conv <- as.factor(sign(residuals_ima_conv))
+factor_residuals_ima_org <- as.factor(sign(residuals_ima_org))
+
+# Perform runs tests
+runs_test_result_arma_conv <- runs.test(factor_residuals_arma_conv)
+runs_test_result_arma_org <- runs.test(factor_residuals_arma_org)
+runs_test_result_ima_conv <- runs.test(factor_residuals_ima_conv)
+runs_test_result_ima_org <- runs.test(factor_residuals_ima_org)
+
+
+print("ARMA Conventional:")
+print(runs_test_result_arma_conv)
+
+print("ARMA Organic:")
+print(runs_test_result_arma_org)
+
+print("IMA Conventional:")
+print(runs_test_result_ima_conv)
+
+print("IMA Organic:")
+print(runs_test_result_ima_org)
+
+```
+
+```{r}
+# Extract residuals
+residuals_arma_conv <- resid(arma_conv)
+sampled_residuals_arma_conv <- as.data.frame(residuals_arma_conv) %>%
+  sample_n(5000, replace = TRUE)
+shapiro.test(sampled_residuals_arma_conv$x)
+
+residuals_arma_org <- resid(arma_org)
+sampled_residuals_arma_org <- as.data.frame(residuals_arma_org) %>%
+  sample_n(5000, replace = TRUE)
+shapiro.test(sampled_residuals_arma_org$x)
+
+residuals_ima_conv <- resid(ima_conv)
+sampled_residuals_ima_conv <- as.data.frame(residuals_ima_conv) %>%
+  sample_n(5000, replace = TRUE)
+shapiro.test(sampled_residuals_ima_conv$x)
+
+residuals_ima_org <- resid(ima_org)
+sampled_residuals_ima_org <- as.data.frame(residuals_ima_org) %>%
+  sample_n(5000, replace = TRUE)
+shapiro.test(sampled_residuals_ima_org$x)
+
+```
+```{r}
+qqnorm(residuals_arma_conv, main = "Q-Q Plot - Residuals ARMA(1,2) Conventional", col = "#d8b365", pch = 20)
+qqline(residuals_arma_conv, col = "red")
+```
+
+```{r}
+qqnorm(residuals_arma_org, main = "Q-Q Plot - Residuals ARMA(1,2) Organic", col = "#5ab4ac", pch = 20)
+qqline(residuals_arma_org, col = "red")
+```
+
+```{r}
+qqnorm(residuals_ima_conv, main = "Q-Q Plot - Residuals IMA(1,2) Conventional", col = "#d8b365", pch = 20)
+qqline(residuals_ima_conv, col = "red")
+```
+
+```{r}
+qqnorm(residuals_ima_conv, main = "Q-Q Plot - Residuals IMA(1,2) Organic", col = "#5ab4ac", pch = 20)
+qqline(residuals_ima_org, col = "red")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
